@@ -1,0 +1,25 @@
+# Setting
+seed: 1337
+checkpoint_save_dir: ./checkpoints/vae
+image_save_dir: ./assets/images/vae
+
+# Data
+resolution: 64
+num_downsample: 4
+base_data_dir: ./data/animeface
+normalize: true
+
+# Training parameters
+batch_size: 128
+num_workers: 16
+num_epochs: 40
+learning_rate: 0.001
+weight_decay: 0.01
+beta: 5.0
+
+# Architecture
+latent_channels: 16
+hidden_channels: 32
+
+# Visualization
+nrow: 8

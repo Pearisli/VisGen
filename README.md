@@ -2,10 +2,7 @@
 
 **VisGen** is an accessible and educational project designed for users who want to quickly learn and experiment with classic vision generative models. With a minimalist yet production-quality PyTorch implementation, this project allows you to understand the fundamentals behind popular generative approaches while running experiments with ease.
 
-<div style="text-align: center;">
-  <img src="assets/images/ddpm_samples.png" alt="ddpm samples" />
-  <figcaption>Samples from DDPM trained from scratch</figcaption>
-</div>
+<img src="assets/images/ddpm_samples.png" alt="Samples from DDPM trained from scratch" style="display: block; margin: 0 auto;">
 
 ## Overview
 

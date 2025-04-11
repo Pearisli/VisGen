@@ -15,7 +15,7 @@ Start by cloning the repository and setting up the environment. The project uses
 1. **Clone the repository** (requires git):
    ```bash
    git clone https://github.com/Pearisli/VisGen.git
-   cd VisGen
+   cd VisGen-main
    ```
 
 2. **Install dependencies** (requires conda):

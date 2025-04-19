@@ -25,7 +25,7 @@ Start by cloning the repository and setting up the environment. The project uses
    pip install -r requirements.txt
    ```
 
-## 🚀 Usage
+## 🎮 Usage
 
 ### Dataset Preparation
 
@@ -103,3 +103,44 @@ Experiments have been conducted on a single NVIDIA A800-PCIe-80GB GPU under fixe
         </tbody>
     </table>
 </div>
+
+## 🚀 Advance Training
+
+In the **Advance Training** section, we will guide you through training a Latent Diffusion Model (LDM) on a larger dataset, such as the [Anime Faces 512x512](https://www.kaggle.com/datasets/lukexng/animefaces-512x512) dataset (140K images).
+
+Based on the previously created environment, install extended requirements:
+```bash
+pip install -r requirements+.txt
+```
+
+### Step 1: Precompute Latent Representations
+
+Since LDM operates in the latent space, the first step is to use a pre-trained VAE model to convert the raw images into latent representations. This reduces the computational complexity for subsequent training.
+
+Run the following command to precompute the latent representations:
+
+```bash
+python precompute_latent.py /path/to/source_folder /path/to/target_folder
+```
+
+### Step 2: Train the Latent Diffusion Model
+
+Next, use `accelerate` to launch the training script. `accelerate` is a powerful PyTorch acceleration library that supports multi-GPU, mixed-precision training, and more, significantly improving training efficiency, especially for large models and datasets.
+
+Run the following command to train the Latent Diffusion Model:
+
+```bash
+accelerate launch \
+    --num_machines=1 \
+    --mixed_precision=bf16 \
+    --num_processes=1 \
+    --dynamo_backend='no' \
+    examples/train_ldm.py \
+    --config ./config/train_ldm.yaml
+```
+
+### Results
+
+After training, the Latent Diffusion Model can generate high-quality images. Below are samples generated from scratch using 200 DDIM steps:
+
+<img src="assets/images/ldm_samples.png" alt="Samples from Latent Diffusion model trained from scratch with 200 DDIM steps" style="display: block; margin: 0 auto;">

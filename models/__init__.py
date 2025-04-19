@@ -5,3 +5,4 @@ from .wgan import WGAN
 from .stylegan2 import StyleGAN2
 from .ddpm import DDPMScheduler, UNetModel, DDPMPipeline
 from .flowmatch import FlowMatchScheduler, FlowMatchPipeline
+from .unet_2d import UNet2DModel

@@ -7,9 +7,9 @@ resume_checkpoint: null
 pretrained_model_name_or_path: stabilityai/stable-diffusion-2
 
 # Dataset settings
-data_dir: data/animeface_np_32
-train_size: 290000
-valid_size: 12652
+data_dir: data/animeface_np32
+train_size: 132000
+valid_size: 8000
 train_batch_size: 128
 valid_batch_size: 256
 validation_steps: 2500

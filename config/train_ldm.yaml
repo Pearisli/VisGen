@@ -1,29 +1,29 @@
 # Output and runtime settings
 output_dir: ldm_output
 seed: 1337
-nrow: 6
+nrow: 8
 mixed_precision: bf16
-resume: false
-pretrained_path: null
+resume_checkpoint: null
+pretrained_model_name_or_path: stabilityai/stable-diffusion-2
 
 # Dataset settings
 data_dir: data/animeface_np_32
-train_size: 132000
-valid_size: 8000
+train_size: 290000
+valid_size: 12652
 train_batch_size: 128
-valid_batch_size: 128
-validation_steps: 5000
+valid_batch_size: 256
+validation_steps: 2500
 
 # Diffusion process settings
-beta_start: 0.00155
-beta_end: 0.015
+beta_start: 0.00085
+beta_end: 0.012
 beta_schedule: scaled_linear
 prediction_type: epsilon
 num_inference_steps: 200
 
 # Optimizer and training schedule
 optimizer: adamw
-learning_rate: 5e-5
+learning_rate: 1e-4
 weight_decay: 1e-2
 max_train_steps: 500000
 num_warmup_steps: 10000
@@ -33,11 +33,9 @@ sample_size: 32
 block_out_channels:
   - 192
   - 384
-  - 384
   - 768
   - 768
 down_block_types:
-  - AttnDownBlock2D
   - AttnDownBlock2D
   - AttnDownBlock2D
   - AttnDownBlock2D
@@ -47,12 +45,9 @@ up_block_types:
   - AttnUpBlock2D
   - AttnUpBlock2D
   - AttnUpBlock2D
-  - AttnUpBlock2D
 num_attention_heads:
+  - 4
   - 8
-  - 8
-  - 8
-  - 8
-  - 8
+  - 16
+  - 16
 layers_per_block: 2
-resnet_time_scale_shift: scale_shift

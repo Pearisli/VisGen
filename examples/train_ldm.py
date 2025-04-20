@@ -19,7 +19,7 @@ from accelerate.utils import ProjectConfiguration
 from omegaconf import OmegaConf
 
 from diffusers import AutoencoderKL, DDIMScheduler, DiffusionPipeline
-from diffusers.optimization import get_cosine_schedule_with_warmup
+from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.image_processor import VaeImageProcessor
 
@@ -68,7 +68,7 @@ class LDMPipeline(DiffusionPipeline):
         super().__init__()
         self.register_modules(vae=vae, unet=unet, scheduler=scheduler)
         # Scale latents to match VAE standard deviation
-        self.scale = 0.19805
+        self.scaling_factor = vae.config.scaling_factor
 
     @torch.no_grad()
     def sample_from_posterior(
@@ -82,7 +82,7 @@ class LDMPipeline(DiffusionPipeline):
             noise = torch.randn_like(mean)
             latent = mean + std * noise
         # rescale before decoding
-        return latent * self.scale
+        return latent * self.scaling_factor
 
     @torch.no_grad()
     def __call__(
@@ -108,7 +108,7 @@ class LDMPipeline(DiffusionPipeline):
             latent = self.scheduler.step(model_output, t, latent, generator=generator).prev_sample
 
         # decode and denormalize images
-        decoded = self.vae.decode(latent / self.scale).sample
+        decoded = self.vae.decode(latent / self.scaling_factor).sample
         return VaeImageProcessor.denormalize(decoded)
 
 class LatentDiffusionTrainer:
@@ -182,13 +182,11 @@ class LatentDiffusionTrainer:
         (
             self.unet,
             self.train_dataloader,
-            self.valid_dataloader,
             self.optimizer,
             self.lr_scheduler
         ) = self.accelerator.prepare(
             self.unet,
             self.train_dataloader,
-            self.valid_dataloader,
             self.optimizer,
             self.lr_scheduler
         )
@@ -203,7 +201,8 @@ class LatentDiffusionTrainer:
         timesteps = torch.randint(
             0,
             self.noise_scheduler.config.num_train_timesteps,
-            (batch_size,), device=self.device
+            (batch_size,),
+            device=self.device
         )
         noisy_latent = self.noise_scheduler.add_noise(latent, noise, timesteps)
         model_output: torch.Tensor = self.unet(noisy_latent, timesteps, return_dict=False)[0]
@@ -246,12 +245,11 @@ class LatentDiffusionTrainer:
             # compute validation loss
             total_loss, count = 0.0, 0
             for batch in tqdm(self.valid_dataloader, desc=f"Validation Steps {step}", leave=True):
-                loss = self.compute_loss(batch, reduction="none")
+                loss = self.compute_loss(batch.to(self.device), reduction="none")
                 loss = loss.mean(dim=(1, 2, 3))
                 total_loss += loss.sum().item()
                 count += batch.size(0)
         
-        torch.cuda.empty_cache()
         return total_loss / count
 
     def save_samples(self, samples: torch.Tensor, step: int):
@@ -371,23 +369,22 @@ def main():
                               num_workers=16, pin_memory=True, persistent_workers=True)
 
     # -------------------- Model --------------------
-    if cfg.resume:
-        pipeline: LDMPipeline = LDMPipeline.from_pretrained(cfg.pretrained_path, local_files_only=True)
+    if cfg.resume_checkpoint is not None:
+        pipeline: LDMPipeline = LDMPipeline.from_pretrained(cfg.resume_checkpoint, local_files_only=True)
         pipeline.scheduler.register_to_config(prediction_type=cfg.prediction_type)
     else:
         vae = AutoencoderKL.from_pretrained(
-            "stabilityai/stable-diffusion-2", subfolder="vae", local_files_only=True
+            cfg.pretrained_model_name_or_path, subfolder="vae", local_files_only=True
         )
         unet = UNet2DModel(
             sample_size=cfg.sample_size,
-            in_channels=4,
-            out_channels=4,
+            in_channels=vae.config.latent_channels,
+            out_channels=vae.config.latent_channels,
             down_block_types=tuple(cfg.down_block_types),
             up_block_types=tuple(cfg.up_block_types),
             block_out_channels=tuple(cfg.block_out_channels),
             num_attention_heads=tuple(cfg.num_attention_heads),
             layers_per_block=cfg.layers_per_block,
-            resnet_time_scale_shift=cfg.resnet_time_scale_shift,
         )
         noise_scheduler = DDIMScheduler(
             beta_start=cfg.beta_start,
@@ -397,7 +394,7 @@ def main():
             timestep_spacing="trailing",
             clip_sample=False
         )
-        pipeline = LDMPipeline(vae=vae, unet=unet, noise_scheduler=noise_scheduler)
+        pipeline = LDMPipeline(vae=vae, unet=unet, scheduler=noise_scheduler)
 
     # -------------------- Optimizer and Learning Rate Scheduler --------------------
     if cfg.optimizer == "adam":
@@ -407,8 +404,9 @@ def main():
     else:
         raise ValueError(f"Unsupported optimizer type: {cfg.optimizer}")
 
-    lr_scheduler = get_cosine_schedule_with_warmup(
-        optimizer,
+    lr_scheduler = get_scheduler(
+        name="constant_with_warmup",
+        optimizer=optimizer,
         num_warmup_steps=cfg.num_warmup_steps * accelerator.num_processes,
         num_training_steps=cfg.max_train_steps * accelerator.num_processes
     )

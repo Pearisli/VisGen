@@ -1,5 +1,5 @@
 # Output and runtime settings
-output_dir: ldm_output
+output_dir: ldm_t2i_output
 seed: 1337
 mixed_precision: bf16
 resume_checkpoint: null
@@ -17,8 +17,8 @@ checkpointing_steps: 5000
 num_workers: 16
 
 # Diffusion process settings
-beta_start: 0.001
-beta_end: 0.0135
+beta_start: 0.00085
+beta_end: 0.012
 beta_schedule: scaled_linear
 prediction_type: epsilon
 num_inference_steps: 200
@@ -27,7 +27,7 @@ num_inference_steps: 200
 optimizer: adamw
 learning_rate: 1e-4
 weight_decay: 1e-2
-max_train_steps: 400000
+max_train_steps: 500000
 num_warmup_steps: 10000
 max_grad_norm: 1.0
 
@@ -38,16 +38,11 @@ block_out_channels:
   - 512
   - 1024
   - 1024
-down_block_types:
-  - AttnDownBlock2D
-  - AttnDownBlock2D
-  - AttnDownBlock2D
-  - DownBlock2D
-up_block_types:
-  - UpBlock2D
-  - AttnUpBlock2D
-  - AttnUpBlock2D
-  - AttnUpBlock2D
-attention_head_dim: 64
+attention_head_dim:
+  - 4
+  - 8
+  - 16
+  - 16
+cross_attention_dim: 1024
 
 image_per_row: 8

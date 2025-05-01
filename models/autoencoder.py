@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from typing import Tuple
+from typing import List, Union, Tuple
 
 from src.modules.resnetblock import (
     StackBlock,
@@ -8,6 +8,7 @@ from src.modules.resnetblock import (
     UpBlock,
     normalize
 )
+import src.util.image_util as image_util
 
 class Encoder(nn.Module):
 
@@ -102,5 +103,16 @@ class Autoencoder(nn.Module):
         return dec
 
     @torch.no_grad()
-    def reconstruct(self, samples: torch.Tensor) -> torch.Tensor:
-        return self(samples)
+    def reconst(self, images: Union[torch.Tensor, List[torch.Tensor]], normalize: bool = False) -> torch.Tensor:
+        if isinstance(images, List):
+            images = torch.stack(images)
+
+        device = next(self.parameters()).device
+
+        inputs = images.to(device)
+        if normalize:
+            inputs = image_util.normalize(inputs)
+
+        outputs = self(inputs)
+        outputs = image_util.denormalize(outputs)
+        return outputs

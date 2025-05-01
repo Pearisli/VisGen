@@ -8,6 +8,7 @@ from src.modules.resnetblock import (
     UpBlock,
     normalize
 )
+import src.util.image_util as image_util
 
 class DownBlock(nn.Sequential):
 
@@ -121,9 +122,10 @@ class WGAN(nn.Module):
     def sample(
         self,
         num_samples: int,
-        device: torch.device,
         generator: Optional[torch.Generator] = None
     ) -> torch.Tensor:
+        device = next(self.parameters()).device
         noise = self.get_noise(num_samples, device, generator)
         out = self.generator(noise)
+        out = image_util.denormalize(out)
         return out

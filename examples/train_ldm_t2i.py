@@ -3,7 +3,7 @@ import math
 import os
 from copy import deepcopy
 from io import BytesIO
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Union
 
 import numpy as np
 import torch
@@ -14,15 +14,14 @@ import torchvision.transforms as transforms
 from torchvision.utils import make_grid
 from PIL import Image
 from tqdm.auto import tqdm
+from transformers import CLIPTextModel, CLIPTokenizer
 
-import tensorboard
 from accelerate import Accelerator
 from accelerate.utils import ProjectConfiguration
 from omegaconf import OmegaConf
 
 from datasets import load_dataset
-from diffusers.utils.torch_utils import randn_tensor
-from diffusers import AutoencoderKL, DDIMScheduler, DiffusionPipeline, UNet2DModel
+from diffusers import AutoencoderKL, DDIMScheduler, StableDiffusionPipeline, UNet2DConditionModel
 from diffusers.training_utils import EMAModel
 from diffusers.optimization import get_scheduler
 from src.util.setting import seed_all
@@ -46,62 +45,31 @@ def setup_directories(base_output: str, job_name: str) -> Dict[str, str]:
     }
     return dirs
 
-class LDMPipeline(DiffusionPipeline):
-
-    def __init__(self, vae: AutoencoderKL, unet: UNet2DModel, scheduler: DDIMScheduler):
-        super().__init__()
-        self.register_modules(vae=vae, unet=unet, scheduler=scheduler)
-
-    @torch.no_grad()
-    def __call__(
-        self,
-        batch_size: int = 1,
-        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
-        num_inference_steps: int = 50,
-    ) -> Tuple[torch.Tensor]:
-
-        latents = randn_tensor(
-            (batch_size, self.unet.config.in_channels, self.unet.config.sample_size, self.unet.config.sample_size),
-            generator=generator,
-            device=self.device
-        )
-
-        # scale the initial noise by the standard deviation required by the scheduler
-        latents = latents * self.scheduler.init_noise_sigma
-
-        self.scheduler.set_timesteps(num_inference_steps)
-
-        for t in self.progress_bar(self.scheduler.timesteps):
-            latent_model_input = self.scheduler.scale_model_input(latents, t)
-            # predict the noise residual
-            noise_prediction = self.unet(latent_model_input, t).sample
-            # compute the previous noisy sample x_t -> x_t-1
-            latents = self.scheduler.step(noise_prediction, t, latents).prev_sample
-
-        # adjust latents with inverse of vae scale
-        latents = latents / self.vae.config.scaling_factor
-        # decode the image latents with the VAE
-        image = self.vae.decode(latents).sample
-
-        image = (image / 2 + 0.5).clamp(0, 1)
-
-        return (image,)
-
 @torch.no_grad()
 def log_validation(
     vae: AutoencoderKL,
-    unet: UNet2DModel,
+    text_encoder: CLIPTextModel,
+    tokenizer: CLIPTokenizer,
+    unet: UNet2DConditionModel,
     noise_scheduler: DDIMScheduler,
     valid_dataloader: DataLoader,
+    valid_prompt_embeds: Union[List[str], torch.Tensor],
     cfg: OmegaConf,
     accelerator: Accelerator,
     save_directory: str,
+    weight_dtype: torch.dtype,
     step: int
 ):
-    pipeline = LDMPipeline(
+    pipeline = StableDiffusionPipeline.from_pretrained(
+        cfg.pretrained_model_name_or_path,
         vae=accelerator.unwrap_model(vae),
+        text_encoder=accelerator.unwrap_model(text_encoder),
+        tokenizer=tokenizer,
         unet=accelerator.unwrap_model(unet),
-        scheduler=noise_scheduler
+        scheduler=noise_scheduler,
+        safety_checker=None,
+        torch_dtype=weight_dtype,
+        local_files_only=True
     )
     pipeline = pipeline.to(accelerator.device)
     pipeline.set_progress_bar_config(disable=False)
@@ -115,6 +83,8 @@ def log_validation(
             batch_size=cfg.image_per_row**2,
             generator=generator,
             num_inference_steps=cfg.num_inference_steps,
+            prompt_embeds=valid_prompt_embeds,
+            output_type="pt"
         )[0]
 
         valid_loss = 0
@@ -129,18 +99,16 @@ def log_validation(
 
         for batch in progress_bar:
             latents = vae.encode(batch["pixel_values"].to(accelerator.device)).latent_dist.sample()
+            encoder_hidden_states = text_encoder(batch["input_ids"].to(accelerator.device), return_dict=False)[0]
             latents = latents * vae.config.scaling_factor
 
-            # Sample noise that we'll add to the latents
             noise = torch.randn_like(latents)
 
             bsz = latents.shape[0]
-            # Sample a random timestep for each image
+
             timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
             timesteps = timesteps.long()
 
-            # Add noise to the latents according to the noise magnitude at each timestep
-            # (this is the forward diffusion process)
             noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
             if noise_scheduler.config.prediction_type == "epsilon":
@@ -150,8 +118,7 @@ def log_validation(
             else:
                 raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
 
-            # Predict the noise residual and compute loss
-            model_pred = unet(noisy_latents, timesteps, return_dict=False)[0]
+            model_pred = unet(noisy_latents, timesteps, encoder_hidden_states, return_dict=False)[0]
 
             loss = F.mse_loss(model_pred.float(), target.float(), reduction="none")
             loss = loss.mean(dim=list(range(1, len(loss.shape))))
@@ -198,27 +165,29 @@ def main():
     vae: AutoencoderKL = AutoencoderKL.from_pretrained(
         cfg.pretrained_model_name_or_path, subfolder="vae", local_files_only=True
     )
-    noise_scheduler: DDIMScheduler = DDIMScheduler(
-        beta_start=cfg.beta_start,
-        beta_end=cfg.beta_end,
-        beta_schedule=cfg.beta_schedule,
-        prediction_type=cfg.prediction_type,
-        clip_sample=False,
+    noise_scheduler: DDIMScheduler = DDIMScheduler.from_pretrained(
+        cfg.pretrained_model_name_or_path, subfolder="scheduler", local_files_only=True
     )
-    unet = UNet2DModel(
+    unet = UNet2DConditionModel(
         sample_size=cfg.sample_size,
         in_channels=vae.config.latent_channels,
         out_channels=vae.config.latent_channels,
-        down_block_types=tuple(cfg.down_block_types),
-        up_block_types=tuple(cfg.up_block_types),
         block_out_channels=tuple(cfg.block_out_channels),
-        attention_head_dim=cfg.attention_head_dim
+        attention_head_dim=tuple(cfg.attention_head_dim),
+        cross_attention_dim=cfg.cross_attention_dim
+    )
+    text_encoder = CLIPTextModel.from_pretrained(
+        cfg.pretrained_model_name_or_path, subfolder="text_encoder", local_files_only=True
+    )
+    tokenizer = CLIPTokenizer.from_pretrained(
+        cfg.pretrained_model_name_or_path, subfolder="tokenizer", local_files_only=True
     )
 
     ema_unet = deepcopy(unet)
     ema_unet = EMAModel(
         ema_unet.parameters(),
-        model_cls=UNet2DModel,
+        decay=0.999,
+        model_cls=UNet2DConditionModel,
         model_config=ema_unet.config,
         foreach=True,
     )
@@ -237,6 +206,7 @@ def main():
 
     # freeze parameters of models to save more memory
     vae.requires_grad_(False)
+    text_encoder.requires_grad_(False)
     unet.enable_xformers_memory_efficient_attention()
 
     # For mixed precision training we cast all non-trainable weights (vae, non-lora text_encoder and non-lora unet) to half-precision
@@ -252,6 +222,7 @@ def main():
 
     # Move unet, vae and text_encoder to device and cast to weight_dtype
     vae.to(accelerator.device, dtype=weight_dtype)
+    text_encoder.to(accelerator.device, dtype=weight_dtype)
 
     # -------------------- Optimizer and Learning Rate Scheduler --------------------
     optimizer = optim.AdamW(unet.parameters(), lr=cfg.learning_rate, weight_decay=cfg.weight_decay)
@@ -267,8 +238,15 @@ def main():
     # prepare dataset and dataloaders
     dataset = load_dataset(cfg.data_dir)
     train_dataset, valid_dataset = dataset["train"], dataset["validation"]
+
+    def tokenize_captions(examples):
+        captions = [caption for caption in examples["text"]]
+        inputs = tokenizer(
+            captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
+        )
+        return inputs.input_ids
     
-    # Preprocessing the datasets.
+    # Preprocessing the datasets.  
     train_transforms = transforms.Compose(
         [
             transforms.Resize((cfg.resolution, cfg.resolution)),
@@ -281,12 +259,14 @@ def main():
     def preprocess_train(examples):
         images = [Image.open(BytesIO(image)).convert("RGB") for image in examples["image"]]
         examples["pixel_values"] = [train_transforms(image) for image in images]
+        examples["input_ids"] = tokenize_captions(examples)
         return examples
 
     def collate_fn(examples):
         pixel_values = torch.stack([example["pixel_values"] for example in examples])
         pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-        return {"pixel_values": pixel_values}
+        input_ids = torch.stack([example["input_ids"] for example in examples])
+        return {"pixel_values": pixel_values, "input_ids": input_ids}
 
     with accelerator.main_process_first():
         # Set the training transforms
@@ -299,8 +279,8 @@ def main():
         batch_size=cfg.train_batch_size,
         num_workers=cfg.num_workers,
         collate_fn=collate_fn,
-        pin_memory=True,
-        persistent_workers=True,
+        # pin_memory=True,
+        # persistent_workers=True,
         drop_last=True,
     )
 
@@ -309,9 +289,12 @@ def main():
         batch_size=cfg.valid_batch_size,
         num_workers=cfg.num_workers,
         collate_fn=collate_fn,
-        pin_memory=True,
-        persistent_workers=True,
+        # pin_memory=True,
+        # persistent_workers=True,
     )
+
+    valid_prompt = next(iter(valid_dataloader))["input_ids"]
+    valid_prompt_embeds = text_encoder(valid_prompt[:cfg.image_per_row**2].to(accelerator.device), return_dict=False)[0]
 
     # Prepare everything with our `accelerator`.
     unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
@@ -342,6 +325,9 @@ def main():
             with accelerator.accumulate(unet):
                 # Convert images to latent space
                 latents = vae.encode(batch["pixel_values"]).latent_dist.sample()
+                # Get the text embedding for conditioning
+                encoder_hidden_states = text_encoder(batch["input_ids"], return_dict=False)[0]
+                
                 latents = latents * vae.config.scaling_factor
 
                 # Sample noise that we'll add to the latents
@@ -364,7 +350,7 @@ def main():
                     raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
     
                 # Predict the noise residual and compute loss
-                model_pred = unet(noisy_latents, timesteps, return_dict=False)[0]
+                model_pred = unet(noisy_latents, timesteps, encoder_hidden_states, return_dict=False)[0]
 
                 loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
@@ -399,12 +385,16 @@ def main():
                         ema_unet.copy_to(unet.parameters())
                         log_validation(
                             vae,
+                            text_encoder,
+                            tokenizer,
                             unet,
                             noise_scheduler,
                             valid_dataloader,
+                            valid_prompt_embeds,
                             cfg,
                             accelerator,
                             dirs['vis'],
+                            weight_dtype,
                             global_step
                         )
                         ema_unet.restore(unet.parameters())
@@ -421,10 +411,12 @@ def main():
         unet = accelerator.unwrap_model(unet)
         ema_unet.copy_to(unet.parameters())
 
-        pipeline = LDMPipeline(
+        pipeline = StableDiffusionPipeline.from_pretrained(
+            cfg.pretrained_model_name_or_path,
+            text_encoder=text_encoder,
             vae=vae,
             unet=unet,
-            scheduler=noise_scheduler
+            local_files_only=True
         )
         save_path = os.path.join(dirs["ckpt"], f"step-{global_step}")
         pipeline.save_pretrained(save_path)

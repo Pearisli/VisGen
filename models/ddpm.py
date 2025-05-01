@@ -14,6 +14,7 @@ from src.modules.diffusion import (
     TimestepEmbedding,
     normalize
 )
+import src.util.image_util as image_util
 
 class DDPMScheduler:
 
@@ -305,11 +306,11 @@ class DDPMPipeline(nn.Module):
     def sample(
         self,
         num_samples: int,
-        device: torch.device,
         generator: Optional[torch.Generator] = None,
         num_inference_steps: int = 1000
     ) -> torch.Tensor:
         assert num_inference_steps == self.scheduler.num_train_timesteps
+        device = next(self.unet.parameters()).device
 
         timesteps = self.scheduler.timesteps.to(device)
 
@@ -331,4 +332,5 @@ class DDPMPipeline(nn.Module):
             noisy_latent = self.scheduler.step(model_pred, t, noisy_latent)
 
         sample = noisy_latent
+        sample = image_util.denormalize(sample)
         return sample

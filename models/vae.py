@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from dataclasses import dataclass
-from typing import Tuple, Optional
+from typing import List, Tuple, Optional, Union
 
 from src.modules.resnetblock import (
     StackBlock,
@@ -9,6 +9,7 @@ from src.modules.resnetblock import (
     UpBlock,
     normalize
 )
+import src.util.image_util as image_util
 
 class Encoder(nn.Module):
 
@@ -126,20 +127,28 @@ class VAE(nn.Module):
         return VAEOutput(dec, mean, logvar)
 
     @torch.no_grad()
-    def reconstruct(self, samples: torch.Tensor) -> torch.Tensor:
-        return self(samples).sample
+    def reconst(self, images: Union[torch.Tensor, List[torch.Tensor]], normalize: bool = False) -> torch.Tensor:
+        if isinstance(images, List):
+            images = torch.stack(images)
+
+        device = next(self.parameters()).device
+
+        inputs = images.to(device)
+        if normalize:
+            inputs = image_util.normalize(inputs)
+
+        outputs = self(inputs).sample
+        outputs = image_util.denormalize(outputs)
+        return outputs
 
     @torch.no_grad()
-    def sample(
-        self,
-        num_samples: int,
-        device: torch.device,
-        generator: Optional[torch.Generator] = None
-    ) -> torch.Tensor:
+    def sample(self, num_samples: int, generator: Optional[torch.Generator] = None) -> torch.Tensor:
+        device = next(self.parameters()).device
         z = torch.randn(
             size=(num_samples, self.latent_channels, self.sample_size, self.sample_size),
             device=device,
             generator=generator
         )
         x = self.decode(z)
+        x = image_util.denormalize(x)
         return x

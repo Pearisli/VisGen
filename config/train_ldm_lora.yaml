@@ -1,0 +1,25 @@
+# Output and runtime settings
+output_dir: ldm_lora_output
+seed: 1337
+mixed_precision: bf16
+resume_checkpoint: null
+pretrained_model_name_or_path: stabilityai/stable-diffusion-2-base
+
+# Dataset settings
+data_dir: null # your data directory
+train_batch_size: 32
+validation_steps: 2500
+checkpointing_steps: 10000
+
+num_inference_steps: 50
+resolution: 512
+
+# Optimizer and training schedule
+learning_rate: 1e-4
+weight_decay: 1e-2
+max_train_steps: 50000
+num_warmup_steps: 500
+gradient_accumulation_steps: 1
+max_grad_norm: 1.0
+
+rank: 256

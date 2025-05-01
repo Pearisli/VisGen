@@ -4,133 +4,125 @@ import os
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 
 from omegaconf import OmegaConf
 from tqdm.auto import tqdm
+from datasets import load_dataset
 
 from models import Autoencoder
-from src.dataset.animeface import load_animeface_dataset
-from src.util.setting import seed_all, save_checkpoint
-from src.util.image_util import run_reconstruction_test
+from src.util.setting import seed_all
 from src.util.lr_scheduler import get_cosine_schedule_with_warmup
+from src.util.image_util import make_grid
 
-class AutoencoderTrainer:
-
-    def __init__(
-        self,
-        model: Autoencoder,
-        optimizer: optim.Optimizer,
-        lr_scheduler: optim.lr_scheduler.LRScheduler,
-        device: torch.device,
-    ):
-        self.model = model.to(device)
-        self.optimizer = optimizer
-        self.lr_scheduler = lr_scheduler
-        self.device = device
-    
-    def train(self, dataloader: DataLoader, num_epochs: int):
-        self.model.train()
-
-        for epoch in range(num_epochs):
-            progress_bar = tqdm(dataloader, desc=f"Epoch [{epoch+1}/{num_epochs}]", total=len(dataloader))
-
-            for images, _ in progress_bar:
-
-                images = images.to(self.device)
-                reconstructions = self.model(images)
-
-                loss = F.mse_loss(reconstructions, images)
-                loss.backward()
-
-                self.optimizer.step()
-                self.lr_scheduler.step()
-                self.optimizer.zero_grad()
-                
-                progress_bar.set_postfix({
-                    "loss": f"{loss.item():.4f}",
-                    "lr": f"{self.lr_scheduler.get_last_lr()[0]:.6f}"
-                })
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config", type=str, required=True, help="Path to the YAML config file"
+    )
+    parser.add_argument(
+        "--device", type=str, default="cuda:0", help="Compute device to use, e.g., 'cuda:0', 'cuda:1', or 'cpu'."
+    )
+    return parser.parse_args()
 
 def main():
-    # ------------- Argument & Config -------------
-    parser = argparse.ArgumentParser(description="Train Autoencoder")
-    parser.add_argument(
-        "--config",
-        type=str,
-        default="config/train_autoencoder.yaml",
-        help="Path to config file."
-    )
-    parser.add_argument(
-        "--device",
-        type=int,
-        default=0,
-        help="GPU index"
-    )
-    args = parser.parse_args()
+    # ------------- Config -------------
+    args = parse_args()
     cfg = OmegaConf.load(args.config)
 
-    # ------------- Seed setting -------------
+    # ------------- Seed -------------
     seed_all(cfg.seed)
 
-    # ------------- Model Setup -------------
-    hidden_channels = cfg.hidden_channels
-    block_out_channels = tuple([hidden_channels * (2 ** i) for i in range(cfg.num_downsample + 1)])
-
+    # ------------- Model -------------
     model = Autoencoder(
         in_channels=3,
         out_channels=3,
         latent_channels=cfg.latent_channels,
-        block_out_channels=block_out_channels,
+        block_out_channels=tuple(cfg.block_out_channels),
     )
 
-    # ------------- Data Loading -------------
-    train_dataloader = load_animeface_dataset(
-        base_data_dir=cfg.base_data_dir,
-        resolution=cfg.resolution,
+    # ------------- Data -------------
+    train_dataset = load_dataset(cfg.base_data_dir)["train"]
+
+    train_transforms = transforms.Compose(
+        [
+            transforms.Resize((cfg.image_size, cfg.image_size)),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),
+        ]
+    )
+
+    def preprocess_train(examples):
+        images = [train_transforms(image.convert("RGB")) for image in examples["image"]]
+        return {"images": images}
+
+    train_dataset.set_transform(preprocess_train)
+
+    train_dataloader = DataLoader(
+        train_dataset,
         batch_size=cfg.batch_size,
         num_workers=cfg.num_workers,
-        normalize=cfg.normalize
+        shuffle=True,
+        drop_last=True,
     )
 
     # ------------- Device, Optimizer & Scheduler -------------
-    device = torch.device(f"cuda:{args.device}") if torch.cuda.is_available() else torch.device("cpu")
+    device = torch.device(args.device)
     optimizer = optim.AdamW(
         model.parameters(),
         lr=cfg.learning_rate,
         weight_decay=cfg.weight_decay
     )
+
+    num_epochs = cfg.num_epochs
     num_warmup_steps = len(train_dataloader)
     lr_scheduler = get_cosine_schedule_with_warmup(
         optimizer,
         num_warmup_steps=num_warmup_steps,
-        num_training_steps=cfg.num_epochs * num_warmup_steps
+        num_training_steps=num_epochs * num_warmup_steps
     )
 
     # ------------- Training -------------
-    trainer = AutoencoderTrainer(
-        model=model,
-        optimizer=optimizer,
-        lr_scheduler=lr_scheduler,
-        device=device
-    )
-    trainer.train(train_dataloader, cfg.num_epochs)
+    model.train()
+    model.to(device)
 
-    # ------------- Checkpoint Saving -------------
-    checkpoint_path = os.path.join(cfg.checkpoint_save_dir, "model.pth")
-    save_checkpoint(model, checkpoint_path)
+    for epoch in range(num_epochs):
+        progress_bar = tqdm(
+            train_dataloader,
+            desc=f"Epoch [{epoch+1}/{num_epochs}]",
+            total=len(train_dataloader)
+        )
 
-    # ------------- Testing: Reconstruction & Sampling -------------
-    os.makedirs(cfg.image_save_dir, exist_ok=True)
-    # Reconstruction test
-    run_reconstruction_test(
-        model=model,
-        dataloader=train_dataloader,
-        device=device,
-        save_path=os.path.join(cfg.image_save_dir, "reconstruction.png"),
-        normalize=cfg.normalize,
-        nrow=cfg.nrow
-    )
+        for batch in progress_bar:
+
+            images = batch["images"].to(device)
+            reconstructions = model(images)
+
+            loss = F.mse_loss(reconstructions, images)
+            loss.backward()
+
+            optimizer.step()
+            lr_scheduler.step()
+            optimizer.zero_grad()
+            
+            progress_bar.set_postfix({
+                "loss": f"{loss.item():.4f}",
+                "lr": f"{lr_scheduler.get_last_lr()[0]:.6f}"
+            })
+
+    # ------------- Checkpoint -------------
+    os.makedirs(cfg.save_ckpt_path, exist_ok=True)
+    torch.save(model.state_dict(), os.path.join(cfg.save_ckpt_path, "model.pth"))
+
+    # ------------- Testing -------------
+    os.makedirs(cfg.save_image_path, exist_ok=True)
+    samples = train_dataset[:cfg.image_per_row**2]["images"]
+    reconsts = model.reconst(samples)
+    
+    reconsts_grid = make_grid(reconsts.cpu(), cfg.image_per_row)
+    reconsts_grid.save(os.path.join(cfg.save_image_path, "reconst.png"))
 
 if __name__ == "__main__":
     main()

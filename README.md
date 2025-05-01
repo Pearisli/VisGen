@@ -29,11 +29,7 @@ Start by cloning the repository and setting up the environment. The project uses
 
 ### Dataset Preparation
 
-For instance, to work with the widely-used [Anime Face dataset](https://www.kaggle.com/datasets/splcher/animefacedataset) (63,565 images), download and unzip the data, then organize your images using:
-
-```bash
-python make_dataset.py /path/to/source_folder /path/to/target_folder
-```
+For instance, to work with the widely-used [Anime Face dataset](https://www.kaggle.com/datasets/splcher/animefacedataset) (63,565 images), download and unzip the data.
 
 ### Training Models
 
@@ -41,7 +37,7 @@ Set the appropriate project path and train your chosen model. For example, to tr
 
 ```bash
 export PYTHONPATH=/path/to/your/project:$PYTHONPATH
-python examples/train_vae.py  # Example for training VAE
+python examples/train_vae.py
 ```
 
 Other model scripts include `train_autoencoder.py`, `train_gan.py`, `train_ddpm.py`, etc. Each script corresponds to a specific model variant.
@@ -86,44 +82,27 @@ Experiments have been conducted on a single NVIDIA A800-PCIe-80GB GPU under fixe
                 <td>15 GB</td>
             </tr>
             <tr>
-                <td>DDPM</td>
-                <td>1 hour</td>
-                <td>7 GB</td>
-            </tr>
-            <tr>
                 <td>DDPM (4× Default Channels)</td>
                 <td>4.6 hours</td>
                 <td>25 GB</td>
             </tr>
             <tr>
                 <td>FlowMatch</td>
-                <td>1 hour</td>
-                <td>7 GB</td>
+                <td>4.6 hours</td>
+                <td>25 GB</td>
             </tr>
         </tbody>
     </table>
 </div>
 
-## 🚀 Advance Training
+## 🚀 Advanced Training
 
-In the **Advance Training** section, we will guide you through training a Latent Diffusion Model (LDM) on a larger dataset, such as the [Anime Faces 512x512](https://www.kaggle.com/datasets/lukexng/animefaces-512x512) dataset (140K images).
+In the **Advanced Training** section, we will guide you through training a Latent Diffusion Model (LDM) on a larger dataset, such as the [Anime Faces 512x512](https://www.kaggle.com/datasets/lukexng/animefaces-512x512) dataset (140K images).
 
 Based on the previously created environment, install extended requirements:
 ```bash
 pip install -r requirements+.txt
 ```
-
-### Step 1: Precompute Latent Representations
-
-Since LDM operates in the latent space, the first step is to use a pre-trained VAE model to convert the raw images into latent representations. This reduces the computational complexity for subsequent training.
-
-Run the following command to precompute the latent representations:
-
-```bash
-python precompute_latent.py /path/to/source_folder /path/to/target_folder
-```
-
-### Step 2: Train the Latent Diffusion Model
 
 Next, use `accelerate` to launch the training script. `accelerate` is a powerful PyTorch acceleration library that supports multi-GPU, mixed-precision training, and more, significantly improving training efficiency, especially for large models and datasets.
 

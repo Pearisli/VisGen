@@ -8,6 +8,7 @@ from typing import List, Tuple, Optional
 from src.modules.resnetblock import (
     StackBlock,
 )
+import src.util.image_util as image_util
 
 # Modified from https://blog.paperspace.com/implementation-stylegan2-from-scratch/
 
@@ -373,9 +374,9 @@ class StyleGAN2(nn.Module):
     def get_w(
         self,
         batch_size: int,
-        device: torch.device,
         generator: Optional[torch.Generator] = None
     ) -> torch.Tensor:
+        device = next(self.parameters()).device
         z = torch.randn(batch_size, self.w_dim, device=device, generator=generator)
         w = self.mapping_network(z)
         return w[None, :, :].expand(self.log_resolution, -1, -1)
@@ -383,8 +384,9 @@ class StyleGAN2(nn.Module):
     def get_noise(
         self,
         batch_size: int,
-        device: torch.device
     ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+        device = next(self.parameters()).device
+        
         noise = []
         resolution = 4
 
@@ -401,10 +403,10 @@ class StyleGAN2(nn.Module):
     def sample(
         self,
         num_samples: int,
-        device: torch.device,
         generator: Optional[torch.Generator] = None
     ) -> torch.Tensor:
-        w = self.get_w(num_samples, device, generator)
-        noise = self.get_noise(num_samples, device)
+        w = self.get_w(num_samples, generator)
+        noise = self.get_noise(num_samples)
         out = self.generator(w, noise)
+        out = image_util.denormalize(out)
         return out

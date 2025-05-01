@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from dataclasses import dataclass
-from typing import Tuple
+from typing import List, Tuple, Union
 
 from src.modules.resnetblock import (
     StackBlock,
@@ -9,6 +9,7 @@ from src.modules.resnetblock import (
     UpBlock,
     normalize
 )
+import src.util.image_util as image_util
 
 class Encoder(nn.Module):
 
@@ -156,5 +157,16 @@ class VQVAE(nn.Module):
         return VQVAEOutput(dec, commit_loss)
 
     @torch.no_grad()
-    def reconstruct(self, samples: torch.Tensor) -> torch.Tensor:
-        return self(samples).sample
+    def reconst(self, images: Union[torch.Tensor, List[torch.Tensor]], normalize: bool = False) -> torch.Tensor:
+        if isinstance(images, List):
+            images = torch.stack(images)
+
+        device = next(self.parameters()).device
+
+        inputs = images.to(device)
+        if normalize:
+            inputs = image_util.normalize(inputs)
+
+        outputs = self(inputs).sample
+        outputs = image_util.denormalize(outputs)
+        return outputs

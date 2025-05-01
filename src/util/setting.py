@@ -1,6 +1,4 @@
-import os
 import torch
-
 import random
 import numpy as np
 
@@ -28,19 +26,3 @@ def generate_seed_sequence(
         seed_sequence.append(seed)
 
     return seed_sequence
-
-def save_checkpoint(model: torch.nn.Module, save_path: str, state_dict_only: bool = True):
-    """
-    Save the model checkpoint to a given path.
-
-    Args:
-        model: The PyTorch model to save.
-        save_path: The full path to save the checkpoint file (e.g., 'checkpoints/model.pth').
-        state_dict_only: If True, save only model.state_dict().
-    """
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    if state_dict_only:
-        torch.save(model.state_dict(), save_path)
-    else:
-        torch.save(model, save_path)
-    print(f"Checkpoint saved at {save_path}")

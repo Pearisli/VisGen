@@ -14,6 +14,7 @@ from src.modules.diffusion import (
     TimestepEmbedding,
     normalize
 )
+import src.util.image_util as image_util
 
 class FlowMatchScheduler:
 
@@ -276,10 +277,10 @@ class FlowMatchPipeline(nn.Module):
     def sample(
         self,
         num_samples: int,
-        device: torch.device,
         generator: torch.Generator,
         num_inference_steps: int = 1000,
     ) -> torch.Tensor:
+        device = next(self.unet.parameters()).device
         
         self.scheduler.set_timesteps(num_inference_steps)
         timesteps = self.scheduler.timesteps.to(device)
@@ -302,4 +303,5 @@ class FlowMatchPipeline(nn.Module):
             noisy_latent = self.scheduler.step(model_pred, t, noisy_latent)
 
         sample = noisy_latent
+        sample = image_util.denormalize(sample)
         return sample

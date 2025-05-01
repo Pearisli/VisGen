@@ -1,19 +1,20 @@
 # Setting
 seed: 1337
-checkpoint_save_dir: ./checkpoints/stylegan2
-image_save_dir: ./assets/images/stylegan2
+save_ckpt_path: checkpoints/stylegan2
+save_image_path: assets/images/stylegan2
 
 # Data
-resolution: 64
+image_size: 64
 log_resolution: 6
-base_data_dir: ./data/animeface
+base_data_dir: data/animeface/images
 normalize: true
 
 # Training parameters
 batch_size: 128
 num_workers: 16
 num_epochs: 100
-learning_rate: 0.001
+learning_rate: 1e-3
+lambda_gp: 10
 
 # Architecture
 latent_channels: 512
@@ -22,4 +23,4 @@ mapping_layers: 8
 n_features: 32
 
 # Visualization
-nrow: 8
+image_per_row: 8

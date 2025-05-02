@@ -27,7 +27,7 @@ num_inference_steps: 200
 optimizer: adamw
 learning_rate: 1e-4
 weight_decay: 1e-2
-max_train_steps: 500000
+max_train_steps: 200000
 num_warmup_steps: 10000
 max_grad_norm: 1.0
 

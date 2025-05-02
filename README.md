@@ -25,15 +25,15 @@ Start by cloning the repository and setting up the environment. The project uses
    pip install -r requirements.txt
    ```
 
-## 🎮 Usage
+## 🎮 Basic Usage
 
-### Dataset Preparation
+### 1. Prepare Dataset
 
-For instance, to work with the widely-used [Anime Face dataset](https://www.kaggle.com/datasets/splcher/animefacedataset) (63,565 images), download and unzip the data.
+Download and extract your dataset, for example the [Anime Face dataset (63K images)](https://www.kaggle.com/datasets/splcher/animefacedataset).
 
-### Training Models
+### 2. Train a Model
 
-Set the appropriate project path and train your chosen model. For example, to train a particular model variant:
+Set the project path and launch training. Example for VAE:
 
 ```bash
 export PYTHONPATH=/path/to/your/project:$PYTHONPATH
@@ -44,7 +44,7 @@ Other model scripts include `train_autoencoder.py`, `train_gan.py`, `train_ddpm.
 
 ## 📊 Experiments
 
-Experiments have been conducted on a single NVIDIA A800-PCIe-80GB GPU under fixed settings (batch size: 128, resolution: 64×64). Please note that these modules use **ResNet-based** blocks by **default**; if your GPU memory is not enough, we also provide a **Basic** block alternative.
+Experiments have been conducted on a single NVIDIA A800-PCIe-80GB GPU under fixed settings (batch size: 128, resolution: 64×64). Please note that these modules use **ResNet-based** blocks by **default**; if your GPU memory is not enough, we also provide a **Basic** block alternative or reduce the channels and batch size.
 
 <div style="text-align: center; width: 100%; overflow-x: auto;">
     <table style="width: 100%; border-collapse: collapse; margin: 0 auto;">
@@ -82,7 +82,7 @@ Experiments have been conducted on a single NVIDIA A800-PCIe-80GB GPU under fixe
                 <td>15 GB</td>
             </tr>
             <tr>
-                <td>DDPM (4× Default Channels)</td>
+                <td>DDPM</td>
                 <td>4.6 hours</td>
                 <td>25 GB</td>
             </tr>
@@ -97,29 +97,51 @@ Experiments have been conducted on a single NVIDIA A800-PCIe-80GB GPU under fixe
 
 ## 🚀 Advanced Training
 
-In the **Advanced Training** section, we will guide you through training a Latent Diffusion Model (LDM) on a larger dataset, such as the [Anime Faces 512x512](https://www.kaggle.com/datasets/lukexng/animefaces-512x512) dataset (140K images).
+In this section, we will dive deeper into training a **Latent Diffusion Model (LDM)** on larger, high-resolution datasets and explore text-conditioned generation to broaden the model's applications. Each step includes not only commands and parameter settings but also pedagogical notes to help you understand the underlying principles and best practices.
 
-Based on the previously created environment, install extended requirements:
+### 1. Install Extended Dependencies
+
+Training LDMs requires additional libraries for high-performance data loading, multi-process management, and advanced optimization:
 ```bash
 pip install -r requirements+.txt
 ```
 
-Next, use `accelerate` to launch the training script. `accelerate` is a powerful PyTorch acceleration library that supports multi-GPU, mixed-precision training, and more, significantly improving training efficiency, especially for large models and datasets.
+### 2. Prepare Dataset and Captions
 
-Run the following command to train the Latent Diffusion Model:
+- **Dataset**: Use the [Anime Faces 512×512 (140K images)](https://www.kaggle.com/datasets/lukexng/animefaces-512x512) to train on high-resolution images for finer details.
+- **Captions**: Generate textual tags using the pretrained [DeepDanbooru-PyTorch](https://huggingface.co/pearisli/deepdanbooru-pytorch) model to provide rich text conditions.
+- **Custom Dataset Structure**: For more flexible folder layouts, refer to the [Hugging Face Datasets ImageFolder guide](https://huggingface.co/docs/datasets/image_load#imagefolder).
 
+### 3. Launch Training with `accelerate`
+
+The `accelerate` library simplifies multi-GPU, mixed-precision, and distributed setups:
 ```bash
 accelerate launch \
     --num_machines=1 \
-    --mixed_precision=bf16 \
+    --mixed_precision='no' \
     --num_processes=1 \
     --dynamo_backend='no' \
     examples/train_ldm.py \
     --config ./config/train_ldm.yaml
 ```
+- `--mixed_precision=no`: Default to full precision (FP32) to support all GPUs.
+- **Enable `bf16`** on supported hardware (e.g., NVIDIA A100/A800, H100, or Google Cloud TPUs v4) by setting `--mixed_precision=bf16`.
 
-### Results
+### 4. Sampling Results
 
-After training, the Latent Diffusion Model can generate high-quality images. Below are samples generated from scratch using 200 DDIM steps:
+After training, generate samples with 200 DDIM steps:
 
+#### Unconditional Generation
+  
 <img src="assets/images/ldm_samples.png" alt="Samples from Latent Diffusion model trained from scratch with 200 DDIM steps" style="display: block; margin: 0 auto;">
+
+#### Text-Conditioned Generation
+---
+**From Scratch**
+
+<img src="assets/images/ldm_t2i_samples.png" alt="Samples from text-conditioned Latent Diffusion model trained from scratch with 200 DDIM steps" style="display: block; margin: 0 auto;">
+
+--- 
+**LoRA Fine-Tuning**
+
+<img src="assets/images/ldm_lora_samples.png" alt="Samples from Latent Diffusion model trained by LoRA with 200 DDIM steps" style="display: block; margin: 0 auto;">

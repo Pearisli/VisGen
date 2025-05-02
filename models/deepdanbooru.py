@@ -1,13 +1,11 @@
 import os
-import json
 from PIL.Image import Image
+from typing import List, Tuple, Union
 
 import torch
 import torch.nn as nn
-from torchvision.transforms.functional import to_tensor
-from typing import List, Tuple, Union
-from safetensors.torch import load_file, save_file
-from huggingface_hub import PyTorchModelHubMixin
+from torchvision.transforms.functional import to_tensor, resize
+from huggingface_hub import PyTorchModelHubMixin, hf_hub_download
 
 class Bottleneck(nn.Module):
 
@@ -51,13 +49,14 @@ class Bottleneck(nn.Module):
 
 class DeepDanbooruModel(nn.Module, PyTorchModelHubMixin):
 
-    resolution = 512
-
     def __init__(
         self,
         block_out_channels: Tuple[int, ...],
         blocks_per_layer: Tuple[int, ...],
         num_classes: int,
+        *,
+        tag_file: str,
+        resolution: int = 512
     ) -> None:
         super().__init__()
         in_channels = 64
@@ -65,6 +64,10 @@ class DeepDanbooruModel(nn.Module, PyTorchModelHubMixin):
         self.block_out_channels = block_out_channels
         self.blocks_per_layer = blocks_per_layer
         self.num_classes = num_classes
+        self._tags = []
+        with open(tag_file, "r", encoding="utf-8") as f:
+            self._tags = [line.strip() for line in f if line.strip()]
+        self.resolution = resolution
 
         self.conv1 = nn.Conv2d(3, in_channels, kernel_size=7, stride=2, padding=3)
         self.relu = nn.ReLU(inplace=True)
@@ -95,8 +98,6 @@ class DeepDanbooruModel(nn.Module, PyTorchModelHubMixin):
                             ks // 2 - 1, ks // 2
                         )
 
-        self._tags = []
-
     def _make_layer(
         self,
         num_block: int,
@@ -116,45 +117,6 @@ class DeepDanbooruModel(nn.Module, PyTorchModelHubMixin):
             )
 
         return layers
-    
-    def _save_pretrained(self, save_directory: str, config: dict = None, **kwargs):
-        os.makedirs(save_directory, exist_ok=True)
-        # 1. Save weights
-        save_file(self.state_dict(), os.path.join(save_directory, "model.safetensors"))
-        # 2. Save config
-        if config is None:
-            # assume these were passed at init and stored
-            config = {
-                "block_out_channels": self.block_out_channels,
-                "blocks_per_layer": self.blocks_per_layer,
-                "num_classes": self.num_classes
-            }
-        with open(os.path.join(save_directory, "config.json"), "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
-        # 3. Save tags
-        if hasattr(self, "_tags") and self._tags:
-            with open(os.path.join(save_directory, "tags.txt"), "w", encoding="utf-8") as f:
-                f.write("\n".join(self._tags))
-
-    @classmethod
-    def _from_pretrained(cls, model_id: str, **kwargs) -> "DeepDanbooruModel":
-        # Download & extract if needed
-        repo_path = model_id
-        # Use HF utilities to download: snapshot_download or hf_hub_download under the hood
-        # Here we assume local path
-        # 1. Load config
-        with open(os.path.join(repo_path, "config.json"), "r", encoding="utf-8") as f:
-            cfg = json.load(f)
-        model = cls(tuple(cfg["block_out_channels"]), tuple(cfg["blocks_per_layer"]), cfg["num_classes"])
-        # 2. Load weights
-        state = load_file(os.path.join(repo_path, "model.safetensors"))
-        model.load_state_dict(state, strict=True)
-        # 3. Load tags
-        tags_file = os.path.join(repo_path, "tags.txt")
-        if os.path.isfile(tags_file):
-            with open(tags_file, "r", encoding="utf-8") as f:
-                model._tags = [line.strip() for line in f if line.strip()]
-        return model
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv1(x)
@@ -183,9 +145,9 @@ class DeepDanbooruModel(nn.Module, PyTorchModelHubMixin):
         if isinstance(image, Image):
             image = [image, ]
         if isinstance(image, List):
-            images = torch.stack([to_tensor(img) for img in image])
+            images = torch.stack([resize(to_tensor(img), self.resolution) for img in image])
         
-        assert images.ndim == 4, f"Expected 4D tensor, got shape {images.shape}"
+        assert images.ndim == 4 and images.shape[-1] == self.resolution and images.shape[-2] == self.resolution, f"Expected 4D tensor (N, C, 512, 512), got shape {images.shape}"
         device = next(self.parameters()).device
         images = images.to(device)
 
@@ -200,3 +162,48 @@ class DeepDanbooruModel(nn.Module, PyTorchModelHubMixin):
 
         # Return single result or batch
         return results
+
+    def save_pretrained(
+        self,
+        save_directory: str,
+        config: dict = None,
+        **kwargs
+    ):
+        # 1. Call super to save model and config
+        super().save_pretrained(save_directory, config=config, **kwargs)
+
+        readme = os.path.join(save_directory, "README.md")
+        if os.path.exists(readme):
+            os.remove(readme)
+
+        # 2. Write tags.txt into save_directory
+        tags_path = os.path.join(save_directory, "tags.txt")
+        with open(tags_path, "w", encoding="utf-8") as f:
+            for tag in getattr(self, '_tags', []):
+                f.write(f"{tag}\n")
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        pretrained_model_name_or_path: str,
+        force_download: bool = False,
+        cache_dir: str = None,
+        **model_kwargs
+    ):
+        model_id = str(pretrained_model_name_or_path)
+        if not os.path.isdir(model_id):
+            tag_file = hf_hub_download(
+                repo_id=model_id,
+                filename="tags.txt",
+                force_download=force_download,
+                cache_dir=cache_dir,
+            )
+            model_kwargs["tag_file"] = tag_file
+        
+        instance = super().from_pretrained(
+            pretrained_model_name_or_path,
+            force_download=force_download,
+            cache_dir=cache_dir,
+            **model_kwargs
+        )
+        return instance

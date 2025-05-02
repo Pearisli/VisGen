@@ -202,7 +202,7 @@ class DeepDanbooruModel(nn.Module, PyTorchModelHubMixin):
                 cache_dir=cache_dir,
                 local_files_only=local_files_only,
             )
-            model_kwargs["tag_file"] = tag_file
+        model_kwargs["tag_file"] = tag_file
         
         instance = super().from_pretrained(
             pretrained_model_name_or_path,

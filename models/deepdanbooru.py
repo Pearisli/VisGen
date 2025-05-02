@@ -1,10 +1,10 @@
 import os
 from PIL.Image import Image
-from typing import List, Tuple, Union
 
 import torch
 import torch.nn as nn
 from torchvision.transforms.functional import to_tensor, resize
+from typing import List, Tuple, Union
 from huggingface_hub import PyTorchModelHubMixin, hf_hub_download
 
 class Bottleneck(nn.Module):
@@ -188,15 +188,19 @@ class DeepDanbooruModel(nn.Module, PyTorchModelHubMixin):
         pretrained_model_name_or_path: str,
         force_download: bool = False,
         cache_dir: str = None,
+        local_files_only: bool = False,
         **model_kwargs
     ):
         model_id = str(pretrained_model_name_or_path)
-        if not os.path.isdir(model_id):
+        if os.path.isdir(model_id):
+            tag_file = os.path.join(model_id, "tags.txt")
+        else:
             tag_file = hf_hub_download(
                 repo_id=model_id,
                 filename="tags.txt",
                 force_download=force_download,
                 cache_dir=cache_dir,
+                local_files_only=local_files_only,
             )
             model_kwargs["tag_file"] = tag_file
         
@@ -204,6 +208,7 @@ class DeepDanbooruModel(nn.Module, PyTorchModelHubMixin):
             pretrained_model_name_or_path,
             force_download=force_download,
             cache_dir=cache_dir,
+            local_files_only=local_files_only,
             **model_kwargs
         )
         return instance

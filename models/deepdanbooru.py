@@ -1,5 +1,5 @@
 import os
-from PIL.Image import Image
+from PIL import Image
 
 import torch
 import torch.nn as nn
@@ -137,15 +137,17 @@ class DeepDanbooruModel(nn.Module, PyTorchModelHubMixin):
     @torch.no_grad()
     def tag(
         self,
-        image: Union[Image, List[Image], torch.Tensor],
+        image: Union[Image.Image, List[Image.Image], torch.Tensor],
         threshold: float = 0.5
     ) -> List[List[str]]:
         
         # Convert PIL Images to tensors if needed and stack
-        if isinstance(image, Image):
+        if isinstance(image, Image.Image):
             image = [image, ]
         if isinstance(image, List):
-            images = torch.stack([resize(to_tensor(img), self.resolution) for img in image])
+            images = torch.stack([
+                resize(to_tensor(img), [self.resolution, self.resolution])
+            for img in image])
         
         assert images.ndim == 4 and images.shape[-1] == self.resolution and images.shape[-2] == self.resolution, f"Expected 4D tensor (N, C, 512, 512), got shape {images.shape}"
         device = next(self.parameters()).device
